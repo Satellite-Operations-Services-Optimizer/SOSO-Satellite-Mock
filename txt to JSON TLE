@@ -1,0 +1,28 @@
+import json
+
+# List of TLE files for the 5 satellites
+tle_files = ['SOSO-1_TLE.txt', 'SOSO-2_TLE.txt', 'SOSO-3_TLE.txt', 'SOSO-4_TLE.txt', 'SOSO-5_TLE.txt']
+
+for i, tle_file in enumerate(tle_files):
+    # Read TLE data from the file
+    with open(tle_file, 'r') as file:
+        tle_data = file.read()
+
+    # Split the TLE data into lines
+    tle_lines = tle_data.strip().split('\n')
+
+    # Extract TLE lines into a dictionary
+    tle_dict = {
+        'name': tle_lines[0],
+        'line1': tle_lines[1],
+        'line2': tle_lines[2]
+    }
+
+    # Convert the dictionary to JSON
+    tle_json = json.dumps(tle_dict, indent=4)
+
+    # Save the JSON data to a file
+    json_filename = f'SOSO-{i + 1}_TLE.json'
+    with open(json_filename, 'w') as json_file:
+        json_file.write(tle_json)
+        print(f'TLE data for {tle_file} has been converted and saved to {json_filename}')
