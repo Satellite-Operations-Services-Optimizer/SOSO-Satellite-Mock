@@ -10,6 +10,8 @@
 # (Additional_Ver2) Image Order validation based on FOV ground track to satellite
 # (Additional_Ver2) Power degradation documentation (References: )
 
+# This is the Youssef branch version
+
 ## Imports
 from skyfield.api import load, EarthSatellite, Topos
 from datetime import timedelta, datetime
