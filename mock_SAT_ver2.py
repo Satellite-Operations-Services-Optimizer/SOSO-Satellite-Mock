@@ -6,16 +6,15 @@
 # Conversion of positional data to json for future use in cesium
 # Is the satellite in eclipse or in sunlight?
 # (Additional_Ver1.1) Power restriction based on eclipse of sunlight
-# (Additional_Ver2) FOV ground track to satellite calculation (References: Earth Coverage Paper)
-# (Additional_Ver2) Image Order validation based on FOV ground track to satellite
-# (Additional_Ver2) Power degradation documentation (References: )
+# (Additional_Ver2) FOV ground track to satellite calculation (References: Earth Coverage Paper) [In Progress]
+# (Additional_Ver2) Image Order validation based on FOV ground track to satellite [To Do]
+# (Additional_Ver2) Power degradation documentation (References: ) [To Do]
 
 ## Imports
 from skyfield.api import load, EarthSatellite, Topos
 from datetime import timedelta, datetime
 import matplotlib.pyplot as plt
 import json
-from czml import czml
 import numpy as np
 from math import atan, degrees
 
@@ -39,6 +38,15 @@ for i in range(1, 6): # Iterate over numbers 1 to 5
     except IndexError: # Handles TLE files without title line or missing lines
         print(f"Error: TLE file for satellite {i} is not formatted correctly.") # Output of error
 
+## Step 4: (Maintenance) Is the satellite in eclipse or in sunlight?
+eph = load('de421.bsp')  # Load the JPL ephemeris DE421
+sun = eph['sun']  # Get the 'sun' object from the ephemeris
+earth = eph['earth']  # Get the 'earth' object from the ephemeris
+
+# Power Management Example
+P_sunlit = 1000 # in Watts during Sunlight
+P_eclipse = P_sunlit * 0.4 # in Watts during Eclipse (assuming 40% of power is used)
+
 ## Step 2: Select time interval for satellite and ground station accesses.
 
 # Ask the user for the start and end times
@@ -61,6 +69,18 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
         subpoint_current = satellite.at(current_time_skyfield).subpoint()
         latitude_current = subpoint_current.latitude.degrees  # Latitude at the current time
         longitude_current = subpoint_current.longitude.degrees  # Longitude at the current time
+        
+        # Get the positions of the Earth, Sun, and satellite
+        earth_pos = earth.at(current_time_skyfield).position.km
+        sun_pos = sun.at(current_time_skyfield).position.km
+        satellite_pos = (earth + satellite).at(current_time_skyfield).position.km
+
+        # Calculate the vectors from the satellite to the Earth and Sun
+        satellite_to_earth = earth_pos - satellite_pos
+        satellite_to_sun = sun_pos - satellite_pos
+
+        # Calculate the angle between these vectors
+        angle = satellite_to_earth.angle(satellite_to_sun).degrees
 
         # Append the latitude and longitude to their respective lists
         latitudes[i].append(latitude_current)
@@ -82,15 +102,6 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
 
         current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1))
 
-## Step 4: (Maintenance) Is the satellite in eclipse or in sunlight?
-eph = load('de421.bsp')  # Load the JPL ephemeris DE421
-sun = eph['sun']  # Get the 'sun' object from the ephemeris
-earth = eph['earth']  # Get the 'earth' object from the ephemeris
-
-# Power Management Example
-P_sunlit = 1000 # in Watts during Sunlight
-P_eclipse = P_sunlit * 0.4 # in Watts during Eclipse (assuming 40% of power is used)
-
 for i, satellite in enumerate(satellites):  # Loop over the satellites in the list.
     current_time_skyfield = start_time_skyfield
     while current_time_skyfield.tt < end_time_skyfield.tt:  # Compare Julian dates
@@ -100,11 +111,11 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
 
         if is_sunlit_current:
             print(f"SOSO-{i + 1} at Current Time: {is_sunlit_current}")
-            print(f"  The satellite is in sunlight. Power is unrestricted = {P_sunlit}.")
+            print(f"  The satellite is in sunlight. Power is unrestricted = {P_sunlit} W.")
             print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
         else:
             print(f"SOSO-{i + 1} at Current Time: {is_sunlit_current}")
-            print(f"  The satellite is in eclipse. All activities must use less power than a predefined limit = {P_eclipse}.")
+            print(f"  The satellite is in eclipse. All activities must use less power than a predefined limit = {P_eclipse} W.")
             print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
 
         current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1))
