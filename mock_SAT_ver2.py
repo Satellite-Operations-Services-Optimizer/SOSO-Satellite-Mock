@@ -80,7 +80,15 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
         satellite_to_sun = sun_pos - satellite_pos
 
         # Calculate the angle between these vectors
-        angle = satellite_to_earth.angle(satellite_to_sun).degrees
+        # Normalize the vectors
+        satellite_to_earth_norm = satellite_to_earth / np.linalg.norm(satellite_to_earth)
+        satellite_to_sun_norm = satellite_to_sun / np.linalg.norm(satellite_to_sun)
+
+        # Calculate the dot product of the vectors
+        dot_product = np.dot(satellite_to_earth_norm, satellite_to_sun_norm)
+
+        # Calculate the angle between the vectors in degrees
+        angle = np.arccos(dot_product) * 180 / np.pi
 
         # Append the latitude and longitude to their respective lists
         latitudes[i].append(latitude_current)
