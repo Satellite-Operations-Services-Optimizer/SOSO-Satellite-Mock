@@ -1,6 +1,6 @@
 # SOSO-Satellite-Mock
 Repo for mock satellite.
-mock_SAT_ver2.py - Main file
+mock_SAT_ver2.py - Main file.
 
 ## Current Functionality:
 1. Read TLE files in json.
