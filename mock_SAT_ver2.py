@@ -15,6 +15,8 @@ from skyfield.api import load, EarthSatellite, Topos
 from datetime import timedelta, datetime
 import matplotlib.pyplot as plt
 import json
+import os
+from skyfield.sgp4lib import EarthSatellite
 import numpy as np
 from math import atan, degrees
 
@@ -38,7 +40,7 @@ for i in range(1, 6): # Iterate over numbers 1 to 5
     except IndexError: # Handles TLE files without title line or missing lines
         print(f"Error: TLE file for satellite {i} is not formatted correctly.") # Output of error
 
-## Step 4: (Maintenance) Is the satellite in eclipse or in sunlight?
+## Step 2: (Maintenance) Is the satellite in eclipse or in sunlight?
 eph = load('de421.bsp')  # Load the JPL ephemeris DE421
 sun = eph['sun']  # Get the 'sun' object from the ephemeris
 earth = eph['earth']  # Get the 'earth' object from the ephemeris
@@ -47,7 +49,7 @@ earth = eph['earth']  # Get the 'earth' object from the ephemeris
 P_sunlit = 1000 # in Watts during Sunlight
 P_eclipse = P_sunlit * 0.4 # in Watts during Eclipse (assuming 40% of power is used)
 
-## Step 2: Select time interval for satellite and ground station accesses.
+## Step 3: Select time interval for satellite and ground station accesses.
 
 # Ask the user for the start and end times
 start_time_str = input("Enter the start time (YYYY-MM-DD HH:MM:SS): ")
@@ -61,7 +63,7 @@ end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
 start_time_skyfield = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second)
 end_time_skyfield = ts.utc(end_time.year, end_time.month, end_time.day, end_time.hour, end_time.minute, end_time.second)
 
-## Step 3: Get live data of the satellites' position (i.e. x, y, z coordinates, latitude, longitude)
+## Step 4: Get live data of the satellites' position (i.e. x, y, z coordinates, latitude, longitude)
 for i, satellite in enumerate(satellites):  # Loop over the satellites in the list.
     current_time_skyfield = start_time_skyfield
     while current_time_skyfield.tt < end_time_skyfield.tt:  # Compare Julian dates
@@ -98,14 +100,15 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
         altitude_current = np.linalg.norm(position_current) - 6371  # Earth's radius is approximately 6371 km
 
         # Calculate FOV
-        fov_current = degrees(2 * atan(12742 / (2 * (altitude_current + 6371))))
+        # fov_current = degrees(2 * atan(12742 / (2 * (altitude_current + 6371))))
+        # No need to calculate FOV since it is given to us.
 
         print(f"SOSO-{i + 1} at Current Time:")
         print(f"  Position: {position_current}")
         print(f"  Latitude: {latitude_current}")
         print(f"  Longitude: {longitude_current}")
         print(f"  Altitude: {altitude_current} km")
-        print(f"  Field of View: {fov_current} degrees")
+        # print(f"  Field of View: {fov_current} degrees")
         print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
 
         current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1))
@@ -128,8 +131,68 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
 
         current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1))
 
+## Step 5: Load the Image Orders & Validation Methodology
+
+# Spotlight image = 10 km height x 10 km width square area, 120 second transfer time, 512 MB.
+# Medium image = 40 km height x 20 km width square area, 45 second transfer time, 256 MB.
+# Low image = 40 km height x 20 km width square area, 20 second transfer time, 128 MB.
+
+# Given: Satellite FOV -> Viewing Angle = 30 degrees, Full View = 60 degrees.
+# If FOV square area of 577 km height x 577 km width propagated on ground track doesn't cover square area of image in image order list, then unacceptable.
+# Variables to consider in image order: Latitude, Longitude, Image Start Time, Image End Time, Revisit Time (True or False).
+# Transfer Time: delta between image start time and image end time.
+
+# Load the image orders
+# Get a list of all the order files in the SampleOrders folder
+order_files = os.listdir('SampleOrders')
+
+# Iterate over each order file
+for order_file in order_files:
+    try:
+        with open(f'SampleOrders/{order_file}') as f:
+            order = json.load(f)
+            lat = order['Latitude']
+            lon = order['Longitude']
+            start_time = datetime.strptime(order['ImageStartTime'], '%Y-%m-%dT%H:%M:%S')
+            end_time = datetime.strptime(order['ImageEndTime'], '%Y-%m-%dT%H:%M:%S')
+            image_type = order['ImageType']
+
+            # Establish square area for each image type
+            if image_type == 'Spotlight':
+                image_area = 10 * 10 # km^2
+            elif image_type == 'Medium':
+                image_area = 40 * 20 # km^2
+            else: # Low
+                image_area = 40 * 20 # km^2
+
+            # Iterate over each satellite
+            for satellite in satellites:
+                # Calculate satellite's position at each second during the transfer time
+                for t in range(int((end_time - start_time).total_seconds())):
+                    time = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second + t)
+                    geocentric = satellite.at(time)
+                    subpoint = geocentric.subpoint()
+                    sat_lat = subpoint.latitude.degrees
+                    sat_lon = subpoint.longitude.degrees
+
+                    # Check if satellite's FOV falls within the image order
+                    if abs(sat_lat - lat) <= np.sqrt(image_area) / 2 and abs(sat_lon - lon) <= np.sqrt(image_area) / 2:
+                        print(f"Satellite {satellite.model.satnum} has an acceptable image at Order_{i}.json")
+                        break
+                else:
+                    print(f"Satellite {satellite.model.satnum} has an unacceptable image at Order_{i}.json")
+
+    except FileNotFoundError:
+        print(f"Error: Order file for image order {i} not found.")
+
 ###################################################################################################################################################################################################
-## FRONT-END
+################################ FUNCTIONS
+###################################################################################################################################################################################################
+
+
+
+###################################################################################################################################################################################################
+################################ FRONT-END
 ###################################################################################################################################################################################################
 
 # Convert lists to numpy arrays after collecting all data
@@ -179,7 +242,7 @@ with open('satellite_data.json', 'w') as f:
     json.dump(data, f)
     
 # Create a new figure
-fig = plt.figure()
+fig = plt.figure(1)
 
 # Add a subplot with a projection of 'mollweide'
 ax = fig.add_subplot(111, projection='mollweide')
@@ -211,4 +274,12 @@ ax.plot(longitudes_soso5_rad, latitudes_soso5_rad, color='green', label='SOSO-5'
 ax.legend()
 
 # Show the plot
+plt.show()
+
+plt.figure(2)
+plt.title('Top Down View of Satellite FOV and Image Order')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.plot([lon, lon, lon + np.sqrt(image_area), lon + np.sqrt(image_area), lon], [lat, lat + np.sqrt(image_area), lat + np.sqrt(image_area), lat, lat], 'r-') # Image order
+plt.plot([sat_lon, sat_lon, sat_lon + np.sqrt(image_area), sat_lon + np.sqrt(image_area), sat_lon], [sat_lat, sat_lat + np.sqrt(image_area), sat_lat + np.sqrt(image_area), sat_lat, sat_lat], 'b-') # Satellite FOV
 plt.show()
