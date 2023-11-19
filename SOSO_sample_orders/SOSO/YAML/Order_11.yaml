@@ -1,0 +1,9 @@
+DeliveryTime: '2023-11-19T06:51:29'
+ImageEndTime: '2023-11-18T22:51:29'
+ImageStartTime: '2023-11-18T15:50:20'
+ImageType: Low
+Latitude: -84.08667285558514
+Longitude: -34.82267079824365
+Priority: 1
+Recurrence:
+- Revist: 'False'

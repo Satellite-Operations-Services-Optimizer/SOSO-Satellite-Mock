@@ -7,18 +7,17 @@
 # Is the satellite in eclipse or in sunlight?
 # (Additional_Ver1.1) Power restriction based on eclipse of sunlight
 # (Additional_Ver2) FOV ground track to satellite calculation (References: Earth Coverage Paper) [In Progress]
-# (Additional_Ver2) Image Order validation based on FOV ground track to satellite [To Do]
 # (Additional_Ver2) Power degradation documentation (References: ) [To Do]
 
 ## Imports
-from skyfield.api import load, EarthSatellite, Topos
-from datetime import timedelta, datetime
-import matplotlib.pyplot as plt
 import json
 import os
-from skyfield.sgp4lib import EarthSatellite
 import numpy as np
+import matplotlib.pyplot as plt
 from math import atan, degrees
+from skyfield.api import load, EarthSatellite, Topos
+from datetime import timedelta, datetime
+from skyfield.sgp4lib import EarthSatellite
 
 ## Step 1: Load the TLE files
 ts = load.timescale() # Create timescale object for TLE computation
@@ -46,7 +45,9 @@ sun = eph['sun']  # Get the 'sun' object from the ephemeris
 earth = eph['earth']  # Get the 'earth' object from the ephemeris
 
 # Power Management Example
-P_sunlit = 1000 # in Watts during Sunlight
+P_sunlit = 500 # in Watts during Sunlight
+# 200-800 Watts for research sat.
+# 1000-1500 Watts for commercial sat.
 P_eclipse = P_sunlit * 0.4 # in Watts during Eclipse (assuming 40% of power is used)
 
 ## Step 3: Select time interval for satellite and ground station accesses.
@@ -67,7 +68,7 @@ end_time_skyfield = ts.utc(end_time.year, end_time.month, end_time.day, end_time
 for i, satellite in enumerate(satellites):  # Loop over the satellites in the list.
     current_time_skyfield = start_time_skyfield
     while current_time_skyfield.tt < end_time_skyfield.tt:  # Compare Julian dates
-        position_current = satellite.at(current_time_skyfield).position.km  # Plain (x, y, z) coordinates at the current time
+        position_current = satellite.at(current_time_skyfield).position.km  # Plain (x, y, z) coordinates at the current time (Center of Earth)
         subpoint_current = satellite.at(current_time_skyfield).subpoint()
         latitude_current = subpoint_current.latitude.degrees  # Latitude at the current time
         longitude_current = subpoint_current.longitude.degrees  # Longitude at the current time
@@ -75,48 +76,33 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
         # Get the positions of the Earth, Sun, and satellite
         earth_pos = earth.at(current_time_skyfield).position.km
         sun_pos = sun.at(current_time_skyfield).position.km
-        satellite_pos = (earth + satellite).at(current_time_skyfield).position.km
-
-        # Calculate the vectors from the satellite to the Earth and Sun
-        satellite_to_earth = earth_pos - satellite_pos
-        satellite_to_sun = sun_pos - satellite_pos
-
-        # Calculate the angle between these vectors
-        # Normalize the vectors
-        satellite_to_earth_norm = satellite_to_earth / np.linalg.norm(satellite_to_earth)
-        satellite_to_sun_norm = satellite_to_sun / np.linalg.norm(satellite_to_sun)
-
-        # Calculate the dot product of the vectors
-        dot_product = np.dot(satellite_to_earth_norm, satellite_to_sun_norm)
-
-        # Calculate the angle between the vectors in degrees
-        angle = np.arccos(dot_product) * 180 / np.pi
 
         # Append the latitude and longitude to their respective lists
         latitudes[i].append(latitude_current)
         longitudes[i].append(longitude_current)
 
         # Calculate altitude from position data
-        altitude_current = np.linalg.norm(position_current) - 6371  # Earth's radius is approximately 6371 km
+        semi_major_axis_km = satellite.model.a * 6378.137  # Get the semi-major axis in kilometers
+        altitude_current = semi_major_axis_km - 6378.137  # The altitude is the semi-major axis minus the Earth's radius
 
         # Calculate FOV
         # fov_current = degrees(2 * atan(12742 / (2 * (altitude_current + 6371))))
         # No need to calculate FOV since it is given to us.
 
         print(f"SOSO-{i + 1} at Current Time:")
-        print(f"  Position: {position_current}")
-        print(f"  Latitude: {latitude_current}")
-        print(f"  Longitude: {longitude_current}")
+        print(f"  Position: {position_current} km")
+        print(f"  Latitude: {latitude_current} degrees")
+        print(f"  Longitude: {longitude_current} degrees")
         print(f"  Altitude: {altitude_current} km")
         # print(f"  Field of View: {fov_current} degrees")
         print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
 
-        current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1))
+        current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1)) # Print all variables every minute from start and end times.
 
 for i, satellite in enumerate(satellites):  # Loop over the satellites in the list.
     current_time_skyfield = start_time_skyfield
     while current_time_skyfield.tt < end_time_skyfield.tt:  # Compare Julian dates
-        sat_pos_current = (earth + satellite).at(current_time_skyfield).position.km  # Get the position of the satellite relative to Earth at the current time
+        sat_pos_current = satellite.at(current_time_skyfield).position.km  # Get the position of the satellite relative to Earth at the current time
 
         is_sunlit_current = satellite.at(current_time_skyfield).is_sunlit(eph) # Check if satellite is sunlit at current time
 
@@ -140,56 +126,308 @@ for i, satellite in enumerate(satellites):  # Loop over the satellites in the li
 # Given: Satellite FOV -> Viewing Angle = 30 degrees, Full View = 60 degrees.
 # If FOV square area of 577 km height x 577 km width propagated on ground track doesn't cover square area of image in image order list, then unacceptable.
 # Variables to consider in image order: Latitude, Longitude, Image Start Time, Image End Time, Revisit Time (True or False).
-# Transfer Time: delta between image start time and image end time.
+# Image order square area should be within the satellite FOV square area throughout the transfer time during between the start and end time of the image.
 
-# Load the image orders
-# Get a list of all the order files in the SampleOrders folder
-order_files = os.listdir('SampleOrders')
+# False Image Orders: Order 37 for, 
 
-# Iterate over each order file
-for order_file in order_files:
-    try:
-        with open(f'SampleOrders/{order_file}') as f:
-            order = json.load(f)
-            lat = order['Latitude']
-            lon = order['Longitude']
-            start_time = datetime.strptime(order['ImageStartTime'], '%Y-%m-%dT%H:%M:%S')
-            end_time = datetime.strptime(order['ImageEndTime'], '%Y-%m-%dT%H:%M:%S')
-            image_type = order['ImageType']
+# # Define the image types and their dimensions
+# image_types = {
+#     "Spotlight": [10, 10],
+#     "Medium": [40, 20],
+#     "Low": [40, 20]
+# }
 
-            # Establish square area for each image type
-            if image_type == 'Spotlight':
-                image_area = 10 * 10 # km^2
-            elif image_type == 'Medium':
-                image_area = 40 * 20 # km^2
-            else: # Low
-                image_area = 40 * 20 # km^2
+# # Iterate over the image orders
+# for i in range(1, 51):
+#     with open(f'SampleOrders/Order_{i}.json') as f:
+#         order = json.load(f)
+#     image_type = order["ImageType"]
+#     lat, lon = order["Latitude"], order["Longitude"]
+#     start_time = datetime.strptime(order["ImageStartTime"], "%Y-%m-%dT%H:%M:%S")
+#     end_time = datetime.strptime(order["ImageEndTime"], "%Y-%m-%dT%H:%M:%S")
 
-            # Iterate over each satellite
-            for satellite in satellites:
-                # Calculate satellite's position at each second during the transfer time
-                for t in range(int((end_time - start_time).total_seconds())):
-                    time = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second + t)
-                    geocentric = satellite.at(time)
-                    subpoint = geocentric.subpoint()
-                    sat_lat = subpoint.latitude.degrees
-                    sat_lon = subpoint.longitude.degrees
+#     # Calculate the square area for the image type
+#     image_area = image_types[image_type]
 
-                    # Check if satellite's FOV falls within the image order
-                    if abs(sat_lat - lat) <= np.sqrt(image_area) / 2 and abs(sat_lon - lon) <= np.sqrt(image_area) / 2:
-                        print(f"Satellite {satellite.model.satnum} has an acceptable image at Order_{i}.json")
-                        break
+#     # Iterate over the satellites
+#     for satellite in satellites:
+#         # Calculate the satellite's FOV square area
+#         satellite_area = [577, 577]  # Replace with actual calculation
+
+#         # Note 2: Dependent on altitude. 
+        
+#         # Check if the image area falls within the satellite's FOV
+#         if image_area[0] <= satellite_area[0] and image_area[1] <= satellite_area[1]:
+#             # Calculate the transfer time
+#             transfer_time = end_time - start_time
+#             # Note 1: Change for 120, 45, 20 sec for transfer time.
+
+#             # Check if the satellite stays within the FOV during the transfer time
+#             t = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second)
+#             geocentric = satellite.at(t)
+#             subpoint = geocentric.subpoint()
+#             start_lat, start_lon = subpoint.latitude.degrees, subpoint.longitude.degrees
+
+#             t = ts.utc(end_time.year, end_time.month, end_time.day, end_time.hour, end_time.minute, end_time.second)
+#             geocentric = satellite.at(t)
+#             subpoint = geocentric.subpoint()
+#             end_lat, end_lon = subpoint.latitude.degrees, subpoint.longitude.degrees
+
+#             # If the satellite stays within the FOV, the image is acceptable
+#             if start_lat <= lat <= end_lat and start_lon <= lon <= end_lon:
+#                 print(f"Image order {i} is unacceptable for satellite {satellite.name}")
+#             else:
+#                 print(f"Image order {i} is acceptable for satellite {satellite.name}")
+#         else:
+#             print(f"Image order {i} is acceptable for satellite {satellite.name}")
+
+#         # Plot the FOV and image area
+#         fig, ax = plt.subplots()
+#         ax.add_patch(plt.Rectangle((lon - image_area[1] / 2, lat - image_area[0] / 2), image_area[1], image_area[0], fill=None, edgecolor='r'))
+#         ax.add_patch(plt.Rectangle((start_lon - satellite_area[1] / 2, start_lat - satellite_area[0] / 2), satellite_area[1], satellite_area[0], fill=None, edgecolor='b'))
+#         ax.set_xlim([min(lon - image_area[1] / 2, start_lon - satellite_area[1] / 2) - 10, max(lon + image_area[1] / 2, start_lon + satellite_area[1] / 2) + 10])
+#         ax.set_ylim([min(lat - image_area[0] / 2, start_lat - satellite_area[0] / 2) - 10, max(lat + image_area[0] / 2, start_lat + satellite_area[0] / 2) + 10])
+#         plt.show()
+        
+#         # Note 3: add the lat and lon for the time for when image is acceptable.
+
+# Define image types and their properties
+image_types = {
+    "Spotlight": {"height": 10, "width": 10, "transfer_time": 120},
+    "Medium": {"height": 40, "width": 20, "transfer_time": 45},
+    "Low": {"height": 40, "width": 20, "transfer_time": 20}
+}
+
+# Define the viewing angle
+viewing_angle = 30  # degrees
+
+# Iterate over the image orders
+for i in range(1, 50):
+    with open(f'SampleOrders/Order_{i}.json') as f:
+        order = json.load(f)
+
+    # Get the image type
+    image_type = image_types[order["ImageType"]]
+
+    # Calculate the FOV square area
+    for satellite in satellites:
+        semi_major_axis_km = satellite.model.a * 6378.137  # Get the semi-major axis in kilometers
+        altitude_current = semi_major_axis_km - 6378.137  # The altitude is the semi-major axis minus the Earth's radius
+        fov_current = degrees(2 * atan(12742 / (2 * (altitude_current + 6371))))  # Calculate FOV
+
+        # Check if the image order falls within the FOV
+        if image_type["height"] <= fov_current and image_type["width"] <= fov_current:
+            # Calculate the start and end times
+            start_time = datetime.strptime(order["ImageStartTime"], "%Y-%m-%dT%H:%M:%S")
+            end_time = datetime.strptime(order["ImageEndTime"], "%Y-%m-%dT%H:%M:%S")
+            
+            # Convert the datetime objects to skyfield Time objects
+            start_time_skyfield = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second)
+            end_time_skyfield = ts.utc(end_time.year, end_time.month, end_time.day, end_time.hour, end_time.minute, end_time.second)
+
+            # Get the satellite's position at the start and end times
+            start_position = satellite.at(start_time_skyfield).position.km
+            end_position = satellite.at(end_time_skyfield).position.km
+
+            # Check if the satellite stays within the FOV during the transfer time
+            transfer_end_time = start_time + timedelta(seconds=image_type["transfer_time"])
+            if start_time <= transfer_end_time <= end_time:
+                if start_position[0] <= end_position[0] and start_position[1] <= end_position[1]:
+                    print(f"Order {i} is acceptable for {satellite.name}.")
+                    print(f"Transfer completed at time {transfer_end_time}, lat {order['Latitude']}, lon {order['Longitude']}")
+                    
+                    # Plot the satellite's position
+                    plt.figure(figsize=(10, 10))
+                    plt.plot([order['Longitude']], [order['Latitude']], 'ro')
+                    plt.xlim(order['Longitude'] - 1, order['Longitude'] + 1)
+                    plt.ylim(order['Latitude'] - 1, order['Latitude'] + 1)
+                    plt.grid(True)
+                    plt.title(f"Satellite {satellite.name} Position for Order {i}")
+                    plt.xlabel("Longitude")
+                    plt.ylabel("Latitude")
+                    plt.show()
                 else:
-                    print(f"Satellite {satellite.model.satnum} has an unacceptable image at Order_{i}.json")
-
-    except FileNotFoundError:
-        print(f"Error: Order file for image order {i} not found.")
+                    print(f"Order {i} is unacceptable for {satellite.name}.")
+            else:
+                print(f"Order {i} is unacceptable for {satellite.name}.")
+        else:
+            print(f"Order {i} is unacceptable for {satellite.name}.")
 
 ###################################################################################################################################################################################################
 ################################ FUNCTIONS
 ###################################################################################################################################################################################################
 
+# Function 1: Read TLE files for SOSO constellation
+def load_satellites():
+    ts = load.timescale()
+    satellites = []
 
+    for i in range(1, 6):
+        try:
+            with open(f'SOSO-{i}_TLE.json') as f:
+                data = json.load(f)
+                name = data['name']
+                line1 = data['line1']
+                line2 = data['line2']
+            satellite = EarthSatellite(line1, line2, name, ts)
+            satellites.append(satellite)
+        except IndexError:
+            print(f"Error: TLE file for satellite {i} is not formatted correctly.")
+
+    # return ts, satellites
+    pass
+
+# Function 2: Ephemeris Data, Power Draw, and User-defined Start and End Times for Schedule
+def ephemeris_power_schedule_start_end():
+    ## Step 2: (Maintenance) Is the satellite in eclipse or in sunlight?
+    eph = load('de421.bsp')  # Load the JPL ephemeris DE421
+    sun = eph['sun']  # Get the 'sun' object from the ephemeris
+    earth = eph['earth']  # Get the 'earth' object from the ephemeris
+
+    # Power Management Example
+    P_sunlit = 500 # in Watts during Sunlight
+    # 200-800 Watts for research sat.
+    # 1000-1500 Watts for commercial sat.
+    P_eclipse = P_sunlit * 0.4 # in Watts during Eclipse (assuming 40% of power is used)
+
+    ## Step 3: Select time interval for satellite and ground station accesses.
+
+    # Ask the user for the start and end times
+    start_time_str = input("Enter the start time (YYYY-MM-DD HH:MM:SS): ")
+    end_time_str = input("Enter the end time (YYYY-MM-DD HH:MM:SS): ")
+
+    # Convert the input strings to datetime objects
+    start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+    end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
+
+    # Convert the datetime objects to skyfield Time objects
+    start_time_skyfield = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second)
+    end_time_skyfield = ts.utc(end_time.year, end_time.month, end_time.day, end_time.hour, end_time.minute, end_time.second)
+    pass
+
+# Function 3: Location of the Satellites
+def location_satellite():
+    ## Step 4: Get live data of the satellites' position (i.e. x, y, z coordinates, latitude, longitude)
+    for i, satellite in enumerate(satellites):  # Loop over the satellites in the list.
+        current_time_skyfield = start_time_skyfield
+        while current_time_skyfield.tt < end_time_skyfield.tt:  # Compare Julian dates
+            position_current = satellite.at(current_time_skyfield).position.km  # Plain (x, y, z) coordinates at the current time (Center of Earth)
+            subpoint_current = satellite.at(current_time_skyfield).subpoint()
+            latitude_current = subpoint_current.latitude.degrees  # Latitude at the current time
+            longitude_current = subpoint_current.longitude.degrees  # Longitude at the current time
+            
+            # Get the positions of the Earth, Sun, and satellite
+            earth_pos = earth.at(current_time_skyfield).position.km
+            sun_pos = sun.at(current_time_skyfield).position.km
+
+            # Append the latitude and longitude to their respective lists
+            latitudes[i].append(latitude_current)
+            longitudes[i].append(longitude_current)
+
+            # Calculate altitude from position data
+            semi_major_axis_km = satellite.model.a * 6378.137  # Get the semi-major axis in kilometers
+            altitude_current = semi_major_axis_km - 6378.137  # The altitude is the semi-major axis minus the Earth's radius
+
+            # Calculate FOV
+            # fov_current = degrees(2 * atan(12742 / (2 * (altitude_current + 6371))))
+            # No need to calculate FOV since it is given to us.
+
+            print(f"SOSO-{i + 1} at Current Time:")
+            print(f"  Position: {position_current} km")
+            print(f"  Latitude: {latitude_current} degrees")
+            print(f"  Longitude: {longitude_current} degrees")
+            print(f"  Altitude: {altitude_current} km")
+            # print(f"  Field of View: {fov_current} degrees")
+            print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
+
+            current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1)) # Print all variables every minute from start and end times.
+    pass
+
+# Function 4: Power Management
+def eclipse_sunlight():
+    for i, satellite in enumerate(satellites):  # Loop over the satellites in the list.
+        current_time_skyfield = start_time_skyfield
+        while current_time_skyfield.tt < end_time_skyfield.tt:  # Compare Julian dates
+            sat_pos_current = satellite.at(current_time_skyfield).position.km  # Get the position of the satellite relative to Earth at the current time
+
+            is_sunlit_current = satellite.at(current_time_skyfield).is_sunlit(eph) # Check if satellite is sunlit at current time
+
+            if is_sunlit_current:
+                print(f"SOSO-{i + 1} at Current Time: {is_sunlit_current}")
+                print(f"  The satellite is in sunlight. Power is unrestricted = {P_sunlit} W.")
+                print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
+            else:
+                print(f"SOSO-{i + 1} at Current Time: {is_sunlit_current}")
+                print(f"  The satellite is in eclipse. All activities must use less power than a predefined limit = {P_eclipse} W.")
+                print(f"  Time: {current_time_skyfield.utc_strftime('%Y %b %d %H:%M:%S')}")
+
+            current_time_skyfield = ts.utc(current_time_skyfield.utc_datetime() + timedelta(minutes=1))
+    pass
+
+# Function 5: Image Validation
+def image_validation():
+    # Define image types and their properties
+    image_types = {
+        "Spotlight": {"height": 10, "width": 10, "transfer_time": 120},
+        "Medium": {"height": 40, "width": 20, "transfer_time": 45},
+        "Low": {"height": 40, "width": 20, "transfer_time": 20}
+    }
+
+    # Define the viewing angle
+    viewing_angle = 30  # degrees
+
+    # Iterate over the image orders
+    for i in range(1, 50):
+        with open(f'SampleOrders/Order_{i}.json') as f:
+            order = json.load(f)
+
+        # Get the image type
+        image_type = image_types[order["ImageType"]]
+
+        # Calculate the FOV square area
+        for satellite in satellites:
+            semi_major_axis_km = satellite.model.a * 6378.137  # Get the semi-major axis in kilometers
+            altitude_current = semi_major_axis_km - 6378.137  # The altitude is the semi-major axis minus the Earth's radius
+            fov_current = degrees(2 * atan(12742 / (2 * (altitude_current + 6371))))  # Calculate FOV
+
+            # Check if the image order falls within the FOV
+            if image_type["height"] <= fov_current and image_type["width"] <= fov_current:
+                # Calculate the start and end times
+                start_time = datetime.strptime(order["ImageStartTime"], "%Y-%m-%dT%H:%M:%S")
+                end_time = datetime.strptime(order["ImageEndTime"], "%Y-%m-%dT%H:%M:%S")
+                
+                # Convert the datetime objects to skyfield Time objects
+                start_time_skyfield = ts.utc(start_time.year, start_time.month, start_time.day, start_time.hour, start_time.minute, start_time.second)
+                end_time_skyfield = ts.utc(end_time.year, end_time.month, end_time.day, end_time.hour, end_time.minute, end_time.second)
+
+                # Get the satellite's position at the start and end times
+                start_position = satellite.at(start_time_skyfield).position.km
+                end_position = satellite.at(end_time_skyfield).position.km
+
+                # Check if the satellite stays within the FOV during the transfer time
+                transfer_end_time = start_time + timedelta(seconds=image_type["transfer_time"])
+                if start_time <= transfer_end_time <= end_time:
+                    if start_position[0] <= end_position[0] and start_position[1] <= end_position[1]:
+                        print(f"Order {i} is acceptable for {satellite.name}.")
+                        print(f"Transfer completed at time {transfer_end_time}, lat {order['Latitude']}, lon {order['Longitude']}")
+                        
+                        # Plot the satellite's position
+                        plt.figure(figsize=(10, 10))
+                        plt.plot([order['Longitude']], [order['Latitude']], 'ro')
+                        plt.xlim(order['Longitude'] - 1, order['Longitude'] + 1)
+                        plt.ylim(order['Latitude'] - 1, order['Latitude'] + 1)
+                        plt.grid(True)
+                        plt.title(f"Satellite {satellite.name} Position for Order {i}")
+                        plt.xlabel("Longitude")
+                        plt.ylabel("Latitude")
+                        plt.show()
+                    else:
+                        print(f"Order {i} is unacceptable for {satellite.name}.")
+                else:
+                    print(f"Order {i} is unacceptable for {satellite.name}.")
+            else:
+                print(f"Order {i} is unacceptable for {satellite.name}.")
+    pass
 
 ###################################################################################################################################################################################################
 ################################ FRONT-END
@@ -280,6 +518,4 @@ plt.figure(2)
 plt.title('Top Down View of Satellite FOV and Image Order')
 plt.xlabel('Longitude')
 plt.ylabel('Latitude')
-plt.plot([lon, lon, lon + np.sqrt(image_area), lon + np.sqrt(image_area), lon], [lat, lat + np.sqrt(image_area), lat + np.sqrt(image_area), lat, lat], 'r-') # Image order
-plt.plot([sat_lon, sat_lon, sat_lon + np.sqrt(image_area), sat_lon + np.sqrt(image_area), sat_lon], [sat_lat, sat_lat + np.sqrt(image_area), sat_lat + np.sqrt(image_area), sat_lat, sat_lat], 'b-') # Satellite FOV
 plt.show()

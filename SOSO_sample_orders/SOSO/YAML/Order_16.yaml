@@ -1,0 +1,9 @@
+DeliveryTime: '2023-11-18T23:00:42'
+ImageEndTime: '2023-11-18T19:00:42'
+ImageStartTime: '2023-11-18T13:36:14'
+ImageType: Medium
+Latitude: 8.581373066899317
+Longitude: 25.72776182138992
+Priority: 2
+Recurrence:
+- Revist: 'False'
